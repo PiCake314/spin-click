@@ -1,5 +1,7 @@
 // ignore_for_file: non_constant_identifier_names
 
+import 'dart:async';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -37,30 +39,57 @@ class MyHomePage extends StatefulWidget {
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin {
+class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   late AnimationController controller;
   late Animation<double> angle;
   final prefs = SharedPreferencesWithCache.create(
     cacheOptions: const SharedPreferencesWithCacheOptions(
-      allowList: {"high_score"},
+      allowList: {"high_score_single", "high_score_timed"},
     )
   );
 
-
+  // ================== VARIABLES ==================
+  Color point_color = Colors.black;
   double begin = 0, end = 1;
   int score = 0;
   int? high_score;
-  int ms = 1500;
+  static const int START_MS = 1500;
+  int ms = START_MS;
 
   bool wrong = false;
+  bool time_out = false;
   bool is_timed = false;
+  bool missed = false;
 
+
+  bool show_multiplier = false;
+  int continuous_hit = 0;
+  static const Duration ANIMATION_DURATION = Duration(milliseconds: 250);
+  static const List<AssetImage> MULTIPLIERS = [
+    AssetImage("assets/pluses/1.png"),
+    AssetImage("assets/pluses/2.png"),
+    AssetImage("assets/pluses/3.png"),
+    AssetImage("assets/pluses/4.png"),
+    AssetImage("assets/pluses/5.png"),
+  ];
+
+
+  static const int TOTAL_SECONDS = 30;
+  int timer_seconds = TOTAL_SECONDS;
+
+  Timer? timer;
+
+  // ================== FUNCTIONS ==================
 
   Future<void> initScore() async {
     final SharedPreferencesWithCache preferences = await prefs;
-    setState(() {
-      high_score  = preferences.getInt('high_score') ?? 0;
-    });
+    if(preferences.getInt("high_score_single") == null)
+      preferences.setInt("high_score_single", 0);
+
+    if(preferences.getInt("high_score_timed") == null)
+      preferences.setInt("high_score_timed", 0);
+
+    setState(() => high_score = preferences.getInt("high_score_single")!); // starting in single mode
   }
 
 
@@ -76,13 +105,41 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
       duration: Duration(milliseconds: ms),
       vsync: this,
     );
+
     angle = Tween<double>(begin: BEGIN_POINT, end: END_POINT).animate(controller);
-    // controller.value = 3*pi/2; // couldn't get it to work
 
     controller.repeat();
   }
 
+
   double clockwizeDistance(final double a, final double b) => (b - a + 2*pi) % (2*pi);
+
+
+  void reset(){
+    wrong = false;
+    time_out = false;
+    missed = false;
+    continuous_hit = 0;
+    score = 0;
+    begin = 0;
+    end = 1;
+
+
+    if(controller.duration!.inMilliseconds != START_MS){
+      changeSpeedTo(const Duration(milliseconds: START_MS));
+      ms = START_MS;
+    }
+
+    controller.reset();
+    controller.repeat();
+  }
+
+  void newPointsLocation(){
+    final Random rand = Random();
+    begin = rand.nextDouble() * 2 * pi;
+    end = .333 + begin + rand.nextDouble();
+  }
+
 
    void changeSpeedTo(final Duration duration){
     controller.dispose();
@@ -95,32 +152,25 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
    }
 
 
-
-  Future<void> AddPoint() async {
-
+  Future<void> singleShotHit() async {
     await AudioPlayer().play(AssetSource("sounds/score.mp3"));
 
     score += 1;
-
     if(score > high_score!){
       final SharedPreferencesWithCache preferences = await prefs;
-      high_score  = (preferences.getInt('high_score') ?? 0) + 1;
-      preferences.setInt('high_score', score);
+      high_score  = (preferences.getInt("high_score_single") ?? 0) + 1;
+      preferences.setInt("high_score_single", score);
     }
 
     setState(() {
-    // if(score == 5){
-    //   // changeSpeedTo(const Duration(milliseconds: 1000));
-    // }
+      if(score != 0 && score % 5 == 0) changeSpeedTo(Duration(milliseconds: ms -= 50));
 
-      final Random rand = Random();
-      begin = rand.nextDouble() * 2 * pi;
-      end = .333 + begin + rand.nextDouble();
+      newPointsLocation();
     });
   }
 
 
-  Future<void> missed() async {
+  Future<void> singleShotMissed() async {
     await AudioPlayer().play(AssetSource("sounds/wrong.mp3"));
 
     setState(() {
@@ -130,17 +180,87 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
 
     await Future.delayed(const Duration(milliseconds: 750));
 
-    setState((){
-      wrong = false;
-      score = 0;
-      begin = 0;
-      end = 1;
+    setState(reset);
+  }
 
-      controller.reset();
+
+  Future<void> timedHit() async {
+    if(score == 0) startTimer();
+
+    await AudioPlayer().play(AssetSource("sounds/score.mp3"));
+
+    if(missed) continuous_hit = 0;
+    missed = false;
+
+    if(continuous_hit < 5) ++continuous_hit;
+
+    score += continuous_hit;
+    showMultiplier();
+
+
+    if(score > high_score!){
+      final SharedPreferencesWithCache preferences = await prefs;
+      high_score  = (preferences.getInt("high_score_timed") ?? 0) + 1;
+      preferences.setInt("high_score_timed", score);
+    }
+
+    setState(() {
+      newPointsLocation();
+    });
+  }
+
+
+  Future<void> timedMissed() async {
+    await AudioPlayer().play(AssetSource("sounds/wrong.mp3"));
+    // continuous_hit = 0;
+    missed = true;
+
+    setState(() {
+      point_color = Colors.red;
+      controller.stop();
+    });
+
+    await Future.delayed(const Duration(seconds: 1));
+
+    setState(() {
+      point_color = Colors.black;
       controller.repeat();
     });
   }
 
+
+  void startTimer() => timer = Timer.periodic(
+    const Duration(seconds: 1),
+    (_){
+      if(timer_seconds == 0) timeOut();
+      else setState(() => --timer_seconds);
+    },
+  );
+
+
+  Future<void> timeOut() async {
+    await AudioPlayer().play(AssetSource("sounds/wrong.mp3"));
+
+    setState(() {
+      timer!.cancel();
+      controller.stop();
+      timer_seconds = TOTAL_SECONDS;
+      time_out = true;
+    });
+
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    setState(reset);
+  }
+
+
+  Timer multiplier_timer = Timer(Duration.zero, () {});
+  Future<void> showMultiplier() async {
+    setState(() => show_multiplier = true);
+    // await Future.delayed(const Duration(milliseconds: 1000));
+    multiplier_timer.cancel();
+    multiplier_timer = Timer(const Duration(milliseconds: 1000), () => setState(() => show_multiplier = false));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -184,6 +304,23 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
             ),
           ),
 
+          AnimatedOpacity(
+            opacity: is_timed ? 1 : 0,
+            duration: const Duration(milliseconds: 100),
+            child: Align(
+              alignment: Alignment.center,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 150),
+                child: Text(" ${timer_seconds}s",
+                  style: TextStyle(
+                    fontSize: 64,
+                    fontFamily: GoogleFonts.handjet().fontFamily,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
           Align(
             alignment: Alignment.center,
             child: Text(score.toString(),
@@ -194,22 +331,22 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
             ),
           ),
 
-            AnimatedOpacity(
-              opacity: is_timed ? 1 : 0,
-              duration: const Duration(milliseconds: 100),
-              child: Align(
-                alignment: Alignment.center,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 150),
-                  child: Text("00s",
-                    style: TextStyle(
-                      fontSize: 64,
-                      fontFamily: GoogleFonts.handjet().fontFamily,
-                    ),
-                  ),
-                ),
+
+          AnimatedPositioned(
+            duration: ANIMATION_DURATION,
+            curve: Curves.decelerate,
+            top: MediaQuery.of(context).size.height / 2 - (show_multiplier ? 80 : 40),
+            left: MediaQuery.of(context).size.width / 2 + 10,
+            child: AnimatedOpacity(
+              duration: ANIMATION_DURATION,
+              // curve: Curves.bounceOut,
+              opacity: show_multiplier ? 1 : 0,
+              child: Image(
+                image: MULTIPLIERS[continuous_hit <= 0 ? 0 : continuous_hit -1],
+                width: 65,
               ),
             ),
+          ),
 
           Positioned(
             left: size.width / 2 + radius * cos(begin) - LIMIT_RADIUS / 2,
@@ -245,6 +382,7 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
                 center: center,
                 radius: radius,
                 point_radius: POINT_RADIUS,
+                color: point_color,
               ),
               // size: MediaQuery.of(context).size,
               size: size,
@@ -268,51 +406,69 @@ class _MyHomePageState extends State<MyHomePage>  with TickerProviderStateMixin 
                   final bool scored =
                     clockwizeDistance(fake_begin, angle.value) <= clockwizeDistance(fake_begin, end);
 
-                  // score = 0;
-                  // high_score = 0;
-                  // final SharedPreferencesWithCache preferences = await prefs;
-                  // preferences.setInt('high_score', 0);
 
-                  if(scored) await AddPoint();
-                  else       await missed();
+                  if(scored) await (is_timed ? timedHit() : singleShotHit());
+                  else is_timed ? await timedMissed() : await singleShotMissed();
                 },
               ),
             ),
           ),
 
-        Align(
-          alignment: Alignment.topLeft,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 75, left: 6),
-            child: ElevatedButton(
-              child: is_timed ? const Icon(Icons.timer_sharp, size: 46) : const Icon(Icons.sports_score_sharp, size: 46),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                elevation: 0,
-                splashFactory: NoSplash.splashFactory,
-                minimumSize: const Size(64, 64),
-              ),
-              onPressed: () {
-                setState(() {
+          Align(
+            alignment: Alignment.topLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 75, left: 6),
+              child: ElevatedButton(
+                child: is_timed ? const Icon(Icons.timer_sharp, size: 46) : const Icon(Icons.sports_score_sharp, size: 46),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  elevation: 0,
+                  splashFactory: NoSplash.splashFactory,
+                  minimumSize: const Size(64, 64),
+                ),
+                onPressed: () async {
                   is_timed = !is_timed;
-                });
-              },
+
+                  final SharedPreferencesWithCache preferences = await prefs;
+                  high_score =
+                  preferences.getInt(is_timed  ? "high_score_timed" : "high_score_single")!;
+
+                  setState(() {
+                    if(!is_timed){
+                      if(timer != null) timer!.cancel();
+                      timer_seconds = TOTAL_SECONDS;
+                    }
+
+                    reset();
+                  });
+                },
+              ),
             ),
           ),
-        ),
 
-        if(wrong) Container(color: Colors.red.withOpacity(.3)),
-
-        if(wrong)
-          const Align(
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.close_sharp,
-              color: Colors.red,
-              size: 360,
+          if(wrong) Container(color: Colors.red.withOpacity(.3)),
+          if(wrong)
+            const Align(
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.close_sharp,
+                color: Colors.red,
+                size: 360,
+              ),
             ),
-          ),
+
+
+          if(time_out) Container(color: Colors.blue.withOpacity(.3)),
+          if(time_out)
+            const Align(
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.timer_off_outlined,
+                color: Colors.blue,
+                size: 360,
+              ),
+            ),
         ],
       ),
     );
@@ -326,18 +482,20 @@ class Point extends CustomPainter {
   final (double, double) center;
   final double radius;
   final double point_radius;
+  final Color color;
 
   Point({
     required this.angle,
     required this.radius,
     required this.center,
     required this.point_radius,
+    required this.color
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
-      ..color = Colors.black
+      ..color = color
       ..style = PaintingStyle.fill;
 
     final Offset point_center = Offset(
