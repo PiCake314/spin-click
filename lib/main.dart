@@ -125,9 +125,17 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     end = 1;
 
 
-    if(controller.duration!.inMilliseconds != START_MS){
-      changeSpeedTo(const Duration(milliseconds: START_MS));
+    if(controller.duration!.inMilliseconds != START_MS){      
       ms = START_MS;
+
+      controller.dispose();
+      controller = AnimationController(
+        duration: const Duration(milliseconds: START_MS),
+        vsync: this,
+      );
+
+      // not calling changeSpeedTo because we want to reset the angles as well
+      angle = Tween<double>(begin: BEGIN_POINT, end: END_POINT).animate(controller);
     }
 
     controller.reset();
@@ -205,6 +213,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
 
     setState(() {
+      // change the speed every 25 points by 50
+      // points may increase by 1, 2, 3, 4, or 5 depending on the multiplier
+      final int curr_speed = START_MS - (score ~/ 25) * 50;
+      if(curr_speed != controller.duration!.inMilliseconds){
+        ms = curr_speed;
+        changeSpeedTo(Duration(milliseconds: ms));
+      }
+
+
       newPointsLocation();
     });
   }
@@ -259,7 +276,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     setState(() => show_multiplier = true);
     // await Future.delayed(const Duration(milliseconds: 1000));
     multiplier_timer.cancel();
-    multiplier_timer = Timer(const Duration(milliseconds: 1000), () => setState(() => show_multiplier = false));
+    multiplier_timer = Timer(const Duration(seconds: 1), () => setState(() => show_multiplier = false));
   }
 
   @override
@@ -335,8 +352,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           AnimatedPositioned(
             duration: ANIMATION_DURATION,
             curve: Curves.decelerate,
-            top: MediaQuery.of(context).size.height / 2 - (show_multiplier ? 80 : 40),
-            left: MediaQuery.of(context).size.width / 2 + 10,
+            top: size.height / 2 - (show_multiplier ? 80 : 40),
+            left: size.width / 2 + 10,
             child: AnimatedOpacity(
               duration: ANIMATION_DURATION,
               // curve: Curves.bounceOut,
@@ -384,7 +401,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 point_radius: POINT_RADIUS,
                 color: point_color,
               ),
-              // size: MediaQuery.of(context).size,
+              // size: size,
               size: size,
             ),
           ),
