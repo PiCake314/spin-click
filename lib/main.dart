@@ -166,8 +166,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     score += 1;
     if(score > high_score!){
       final SharedPreferencesWithCache preferences = await prefs;
-      high_score  = (preferences.getInt("high_score_single") ?? 0) + 1;
-      preferences.setInt("high_score_single", score);
+      high_score  = score;
+      preferences.setInt("high_score_single", high_score!);
     }
 
     setState(() {
@@ -208,8 +208,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     if(score > high_score!){
       final SharedPreferencesWithCache preferences = await prefs;
-      high_score  = (preferences.getInt("high_score_timed") ?? 0) + 1;
-      preferences.setInt("high_score_timed", score);
+      high_score  = score;
+      preferences.setInt("high_score_timed", high_score!);
     }
 
     setState(() {
