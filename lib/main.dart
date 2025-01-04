@@ -83,10 +83,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Future<void> initScore() async {
     final SharedPreferencesWithCache preferences = await prefs;
-    if(preferences.getInt("high_score_single") == null)
+    // if(preferences.getInt("high_score_single") == null)
+    //   preferences.setInt("high_score_single", 0);
+    if(!preferences.containsKey("high_score_single"))
       preferences.setInt("high_score_single", 0);
 
-    if(preferences.getInt("high_score_timed") == null)
+    // if(preferences.getInt("high_score_timed") == null)
+    //   preferences.setInt("high_score_timed", 0);
+
+    if(!preferences.containsKey("high_score_timed"))
       preferences.setInt("high_score_timed", 0);
 
     setState(() => high_score = preferences.getInt("high_score_single")!); // starting in single mode
